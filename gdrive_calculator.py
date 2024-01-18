@@ -108,7 +108,8 @@ class GoogleDriveSizeCalculate:
                 'bytes': self.total_bytes,
                 'type': typee,
                 'files': self.total_files,
-                'folders': self.total_folders
+                'folders': self.total_folders,
+                'id': file_id
                 }
 
     def list_drive_dir(self, file_id: str) -> list:
@@ -222,14 +223,14 @@ service =  build('drive', 'v3', credentials=credentials, cache_discovery=False)
 # credentials = service_account.Credentials.from_service_account_file('some_service_account.json',scopes=oauth_scope)
 # service =  build('drive', 'v3', credentials=credentials, cache_discovery=False)
 
-link_or_fileid = input("\nPaste your GoogleDrive file/folder's link/fileId : ")
-
-# ~ Complete creating the service variable and then pass it here
-calculator = GoogleDriveSizeCalculate(service)  #GoogleDriveSizeCalculate(service)   
-calculate = calculator.gdrive_checker(link_or_fileid)
-
-# Note that, gdrive folder size calculating speed depends on how many files inside a folder.
-if not calculate is None:
-    print('')
-    for k, v in calculate.items():
-        print(f'{k.title()}:', v)
+# link_or_fileid = input("\nPaste your GoogleDrive file/folder's link/fileId : ")
+#
+# # ~ Complete creating the service variable and then pass it here
+# calculator = GoogleDriveSizeCalculate(service)  #GoogleDriveSizeCalculate(service)
+# calculate = calculator.gdrive_checker(link_or_fileid)
+#
+# # Note that, gdrive folder size calculating speed depends on how many files inside a folder.
+# if not calculate is None:
+#     print('')
+#     for k, v in calculate.items():
+#         print(f'{k.title()}:', v)
