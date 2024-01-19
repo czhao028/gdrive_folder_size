@@ -8,17 +8,23 @@ BYTES_LIMIT = 100 * 1073741824
 ID_TO_NAME_DICT = {}
 #Here is the code that will return the index if the value is found, otherwise the index of the item that is closest to that value, hope it helps.
 def searchTupleArray(array, start_idx, end_idx, search_val, occupied_indices):
-   bool_index_already_in_use = (occupied_indices.get(start_idx) != None)
+   bool_start_index_already_in_use = (occupied_indices.get(start_idx) != None)
    if( start_idx == end_idx ):
-      return start_idx if (array[start_idx][0] <= search_val and not bool_index_already_in_use) else -1
+      return start_idx if (array[start_idx][0] <= search_val and not bool_start_index_already_in_use) else -1
 
    mid_idx = start_idx + (end_idx - start_idx) // 2
 
-   if( search_val < array[mid_idx][0] ):
+   if( search_val < array[mid_idx][0]):
       return searchTupleArray(array, start_idx, mid_idx, search_val, occupied_indices)
-
    ret = searchTupleArray(array, mid_idx + 1, end_idx, search_val, occupied_indices)
-   return -1 if bool_index_already_in_use else mid_idx if ret == -1 else ret
+   bool_mid_index_already_in_use = (occupied_indices.get(mid_idx) != None)
+   if ret == -1:
+       if bool_mid_index_already_in_use:
+           return searchTupleArray(array, start_idx, mid_idx, search_val, occupied_indices)
+       else:
+           return mid_idx
+   else:
+       return ret
    #return mid_idx if ret == -1 else ret
 
 def verifyAllElemsSumToLessThanMaxBytes(list_of_lists):
@@ -29,6 +35,14 @@ def verifyAllElemsSumToLessThanMaxBytes(list_of_lists):
             its_sum += size
         if its_sum > BYTES_LIMIT:
             raise Exception(f"Bug in your code: pairing {pairing} not compliant")
+def verifyNotMovedFolderInNamesOfMovedFolder(not_moved_folder_id, list_of_moved_folders, service):
+    not_moved_folder_name = getCombinedFolderNameOfListOfFoldersInPath([not_moved_folder_id], service)
+    seen = False
+    for moved_folder_size, moved_folder_id, moved_folder_combined_folder_name in list_of_moved_folders:
+        seen = seen or (not_moved_folder_name in moved_folder_combined_folder_name)
+    if not seen:
+        raise Exception(f"Folder {not_moved_folder_name} not found in moved folders list, {list_of_moved_folders}")
+
 
 def getCombinedFolderNameOfListOfFoldersInPath(list_of_folder_ids, service):
     global ID_TO_NAME_DICT
@@ -70,20 +84,12 @@ def findSubFoldersWithLessThanMaxBytes(folder_id, service):
         if childFolderCalculate["bytes"] < BYTES_LIMIT:
             id_folders_already_being_moved[childFolderCalculate["id"]] = 1
             recursion_tree_folders_being_moved.append((childFolderCalculate["bytes"],
-                                                       #getCombinedFolderNameOfListOfFoldersInPath(folder_list, service),
-                                                       childFolderCalculate["name"]))
+                                                       childFolderCalculate["id"],
+                                                       getCombinedFolderNameOfListOfFoldersInPath(folder_list, service)))
         else:
-            print(f"Child folder id {childFolderCalculate["id"]}, name {childFolderCalculate["name"]} was not moved")
+            #print(f"Child folder id {childFolderCalculate["id"]}, name {childFolderCalculate["name"]} was not moved")
             folders_not_moved.append(childFolderCalculate["id"])
-    #validate that all folders at least appear in subfolders that are being moved
-    for folder_not_moved in folders_not_moved:
-        exists = False
-        for folder_size_moved, folder_id_moved_list, folder_name_moved in recursion_tree_folders_being_moved:
-            exists = exists or (folder_not_moved in folder_id_moved_list)
-        if not exists:
-            raise Exception(f"Folder {folder_not_moved} NOT found, in folders to move, as a parent tree")
-
-    return recursion_tree_folders_being_moved
+    return recursion_tree_folders_being_moved, folders_not_moved
 
 
 """
@@ -125,27 +131,28 @@ with open(input_file_name, "r") as in_file:
             else:
                 print("Getting Folder tree, adding subfolders to folder_sizeidname_tuples")
                 #in the format, [[1024, ["id1", "id2"], "subsubFolderName"], ....]
-                list_of_subfolders = findSubFoldersWithLessThanMaxBytes(calculate['id'], service)
+                list_of_subfolders, list_of_folders_not_moved = findSubFoldersWithLessThanMaxBytes(calculate['id'], service)
+                for not_moved_folder_id in list_of_folders_not_moved: verifyNotMovedFolderInNamesOfMovedFolder(not_moved_folder_id, list_of_subfolders, service)
+                folder_sizeidname_tuples.extend(list_of_subfolders)
 
 
 pairings = []
 picked_indices = dict()
 folder_sizeidname_tuples.sort(key=lambda x: x[0])
 for idx in range(len(folder_sizeidname_tuples)-1, -1, -1):
-    folder_size, folder_id, folder_name = folder_sizeidname_tuples[idx]
     if picked_indices.get(idx) != None: continue
+    folder_size, folder_id, folder_name = folder_sizeidname_tuples[idx]
     list_grouping_this = list()
     candidate_folder_tuple = folder_sizeidname_tuples[idx]
     candidate_index = idx
     remaining_bytes = BYTES_LIMIT
-    while remaining_bytes - candidate_folder_tuple[0] > 0:
+    while candidate_index >= 0 and remaining_bytes - candidate_folder_tuple[0] > 0:
         list_grouping_this.append(candidate_folder_tuple)
         picked_indices[candidate_index] = 1
         remaining_bytes = remaining_bytes - candidate_folder_tuple[0]
-        index_found = searchTupleArray(folder_sizeidname_tuples, 0, len(folder_sizeidname_tuples), remaining_bytes, picked_indices)
-        if index_found > 0:
-            candidate_folder_tuple = folder_sizeidname_tuples[index_found]
-            candidate_index = index_found
+        index_found = searchTupleArray(folder_sizeidname_tuples, 0, len(folder_sizeidname_tuples)-1, remaining_bytes, picked_indices)
+        candidate_folder_tuple = folder_sizeidname_tuples[index_found]
+        candidate_index = index_found
     pairings.append(list_grouping_this)
 
 verifyAllElemsSumToLessThanMaxBytes(pairings)
