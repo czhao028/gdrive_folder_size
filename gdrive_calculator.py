@@ -51,6 +51,16 @@ class GoogleDriveSizeCalculate:
         parsed = urlparse.urlparse(link)
         return parse_qs(parsed.query)['id'][0]
 
+    def moveFolderToAnotherFolder(self, originalFolderId, newParentFolderId):
+        previous_parents = self.gdrive_checker(originalFolderId)["parents"]
+        file = self.__service.files().update(fileId=originalFolderId,
+                               addParents=newParentFolderId,
+                               removeParents=previous_parents[0],
+                               fields='id, parents',
+                               supportsAllDrives=True,
+                               supportsTeamDrives=True).execute()
+        return file
+
     def gdrive_checker(self, LINKorID):
         if self.__service is None:
             return
@@ -70,7 +80,7 @@ class GoogleDriveSizeCalculate:
         print("\nCalculating... Please Wait!")
 
         try:
-            drive_file = self.__service.files().get(fileId=file_id, fields="id, name, mimeType, size", supportsTeamDrives=True).execute()
+            drive_file = self.__service.files().get(fileId=file_id, fields="id, name, mimeType, size, parents", supportsTeamDrives=True).execute()
             name = drive_file['name']
             if drive_file['mimeType'] == self.__G_DRIVE_DIR_MIME_TYPE:
                 typee = 'Folder'
@@ -109,7 +119,8 @@ class GoogleDriveSizeCalculate:
                 'type': typee,
                 'files': self.total_files,
                 'folders': self.total_folders,
-                'id': file_id
+                'id': file_id,
+                'parents': drive_file['parents']
                 }
 
     def list_drive_dir(self, file_id: str) -> list:
@@ -226,8 +237,8 @@ service =  build('drive', 'v3', credentials=credentials, cache_discovery=False)
 # link_or_fileid = input("\nPaste your GoogleDrive file/folder's link/fileId : ")
 #
 # # ~ Complete creating the service variable and then pass it here
-# calculator = GoogleDriveSizeCalculate(service)  #GoogleDriveSizeCalculate(service)
-# calculate = calculator.gdrive_checker(link_or_fileid)
+calculator = GoogleDriveSizeCalculate(service)  #GoogleDriveSizeCalculate(service)
+calculator.moveFolderToAnotherFolder("1q_SnCcAeZM1oV-SjPgDKIHbgjxLDjn3E", GoogleDriveSizeCalculate.getIdFromUrl("https://drive.google.com/drive/folders/1BL7bWhDaRHNW66CUHdmUfknp4SXUmnFx") )
 #
 # # Note that, gdrive folder size calculating speed depends on how many files inside a folder.
 # if not calculate is None:

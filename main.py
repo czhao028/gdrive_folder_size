@@ -1,6 +1,6 @@
 from getfilelistpy import getfilelist
 from httplib2 import Http
-
+import concurrent.futures
 import gdrive_calculator
 from gdrive_calculator import service, credentials, GoogleDriveSizeCalculate
 
@@ -73,8 +73,8 @@ def findSubFoldersWithLessThanMaxBytes(folder_id, service):
          "id": folder_id,
         "fields": "files(name,id)",
     }
-    res = getfilelist.GetFolderTree(resource)  # or r = getfilelist.GetFolderTree(resource)
-    for folder_list in res["id"]:
+    res = getfilelist.GetFileList(resource)  # or r = getfilelist.GetFolderTree(resource)
+    for folder_list in res["folderTree"]["id"]:
         if len(folder_list) < 2: continue
         current_folder_id = folder_list[-1]
         parent_folder_id = folder_list[-2]
@@ -89,9 +89,59 @@ def findSubFoldersWithLessThanMaxBytes(folder_id, service):
         else:
             #print(f"Child folder id {childFolderCalculate["id"]}, name {childFolderCalculate["name"]} was not moved")
             folders_not_moved.append(childFolderCalculate["id"])
+    """
+     "fileList": [
+    {
+      "folderTree": ["folderIdOfsampleFolder1"],
+      "files": [
+        {
+          "name": "Spreadsheet1",
+          "mimeType": "application/vnd.google-apps.spreadsheet"
+        }
+      ]
+    },
+    {
+      "folderTree": ["folderIdOfsampleFolder1", "folderIdOfsampleFolder_2a"],
+      "files": [
+        {
+          "name": "Spreadsheet2",
+          "mimeType": "application/vnd.google-apps.spreadsheet"
+        }
+      ]
+    },
+    """
+    for folderTreeContents in res["fileList"]:
+        if not folderTreeContents["files"]: continue
+        thisFolderId = folderTreeContents["folderTree"][-1]
+        if id_folders_already_being_moved.get(thisFolderId) != None: continue
+        for file_dict_obj in folderTreeContents["files"]:
+            calculator = GoogleDriveSizeCalculate(service)
+            childFileCalculate = calculator.gdrive_checker(file_dict_obj["id"])
+            if childFileCalculate["bytes"] < BYTES_LIMIT:
+                recursion_tree_folders_being_moved.append((childFileCalculate["bytes"],
+                                                       childFileCalculate["id"],
+                                                           childFileCalculate["name"]))
+            else:
+                print(f"ERROR: File {childFileCalculate["name"]} "
+                      f"in directory {getCombinedFolderNameOfListOfFoldersInPath(file_dict_obj["folderTree"], service)}"
+                      f" needs to be moved manually.")
     return recursion_tree_folders_being_moved, folders_not_moved
 
-
+def getListSizeIdName_ForAllSubfoldersLessThanBytesLimit_ForGoogleDriveLink(gdrive_link, service):
+    # ~ Complete creating the service variable and then pass it here
+    global BYTES_LIMIT
+    calculator = GoogleDriveSizeCalculate(service)  # GoogleDriveSizeCalculate(service)
+    calculate = calculator.gdrive_checker(gdrive_link)
+    print(f"Folder name {calculate['name']} is size {calculate['size']}")
+    if calculate['bytes'] < BYTES_LIMIT:
+        return [(int(calculate['bytes']), calculate['id'], calculate['name'])]
+    else:
+        print("Getting Folder tree, adding subfolders to folder_sizeidname_tuples")
+        # in the format, [[1024, ["id1", "id2"], "subsubFolderName"], ....]
+        list_of_subfolders, list_of_folders_not_moved = findSubFoldersWithLessThanMaxBytes(calculate['id'], service)
+        for not_moved_folder_id in list_of_folders_not_moved: verifyNotMovedFolderInNamesOfMovedFolder(
+            not_moved_folder_id, list_of_subfolders, service)
+        return list_of_subfolders
 """
 Instructions
 """
@@ -116,24 +166,20 @@ if answer == "y":
     input_file_name = input("\nPaste file name for comma-separated list of Google Drive links:").strip()
 print(f"Using file name {input_file_name}")
 
-folder_sizeidname_tuples = []
-with open(input_file_name, "r") as in_file:
-    for line in in_file.readlines():
-        line = line.strip()
-        links = line.split(", ")
-        for link in links:
-            # ~ Complete creating the service variable and then pass it here
-            calculator = GoogleDriveSizeCalculate(service)  # GoogleDriveSizeCalculate(service)
-            calculate = calculator.gdrive_checker(link)
-            print(f"Folder name {calculate['name']} is size {calculate['size']}")
-            if calculate['bytes'] < BYTES_LIMIT:
-                folder_sizeidname_tuples.append((int(calculate['bytes']), calculate['id'], calculate['name']))
-            else:
-                print("Getting Folder tree, adding subfolders to folder_sizeidname_tuples")
-                #in the format, [[1024, ["id1", "id2"], "subsubFolderName"], ....]
-                list_of_subfolders, list_of_folders_not_moved = findSubFoldersWithLessThanMaxBytes(calculate['id'], service)
-                for not_moved_folder_id in list_of_folders_not_moved: verifyNotMovedFolderInNamesOfMovedFolder(not_moved_folder_id, list_of_subfolders, service)
-                folder_sizeidname_tuples.extend(list_of_subfolders)
+with concurrent.futures.ThreadPoolExecutor() as executor:
+    folder_sizeidname_tuples = []
+    futures = []
+    with open(input_file_name, "r") as in_file:
+        for line in in_file.readlines():
+            line = line.strip()
+            links = line.split(", ")
+            for link in links:
+                futures.append(
+                    executor.submit(getListSizeIdName_ForAllSubfoldersLessThanBytesLimit_ForGoogleDriveLink,
+                                    gdrive_link=link, service=service))
+        for future in futures:
+            list_of_sizeidname_tuples_for_gdrive_link = future.result()
+            folder_sizeidname_tuples.extend(list_of_sizeidname_tuples_for_gdrive_link)
 
 
 pairings = []
@@ -157,14 +203,35 @@ for idx in range(len(folder_sizeidname_tuples)-1, -1, -1):
 
 verifyAllElemsSumToLessThanMaxBytes(pairings)
 print(pairings)
-resource = {
-    "oauth2": credentials,
-    "id": GoogleDriveSizeCalculate.getIdFromUrl("https://drive.google.com/drive/folders/1rbz6Lv3sQpAnEebm5L7taLOOiMB8_DsX"),
-    #"id": "1MEun1wOZExIqw89hl78X_Dd5W2mlzD-n",
-    "fields": "files(name,id)",
-}
-res = getfilelist.GetFolderTree(resource) # or r = getfilelist.GetFolderTree(resource)
-print(res)
+
+all_spare_drives = list()
+i = 0
+while i < len(pairings):
+    link_i = input(f"We need a total of {len(pairings)} Drive Folder links to split the oversized Drive into. Paste Drive folder #{i} here:")
+    calc_i = GoogleDriveSizeCalculate(service)
+    calculate_i = calc_i.gdrive_checker(link_i)
+    if calc_i.total_folders != 1:
+        print("ERROR: DRIVE LINK MUST BE A GOOGLE DRIVE FOLDER. PASTE ANOTHER DRIVE LINK.")
+    elif int(calculate_i["bytes"]) > 0:
+        print(f"ERROR: SPARE DRIVE MUST BE EMPTY. PROVIDED DRIVE IS SIZE {calculate_i["size"]}. PASTE ANOTHER DRIVE LINK.")
+    else:
+        all_spare_drives.append(calculate_i)
+        i += 1
+
+calculator = GoogleDriveSizeCalculate(service)
+for i, sparedrive_calculateObj in enumerate(all_spare_drives):
+    for folder_size, folder_id, folder_name in pairings[i]:
+        newFolder = calculator.moveFolderToAnotherFolder(folder_id, sparedrive_calculateObj["id"])
+
+
+# resource = {
+#     "oauth2": credentials,
+#     "id": GoogleDriveSizeCalculate.getIdFromUrl("https://drive.google.com/drive/folders/1rbz6Lv3sQpAnEebm5L7taLOOiMB8_DsX"),
+#     #"id": "1MEun1wOZExIqw89hl78X_Dd5W2mlzD-n",
+#     "fields": "files(name,id)",
+# }
+# res = getfilelist.GetFolderTree(resource) # or r = getfilelist.GetFolderTree(resource)
+# print(res)
 
 # 2. Store this optimal pairing
 # 3. Ask the user for N number of Google Drive folders to split the original folder into
