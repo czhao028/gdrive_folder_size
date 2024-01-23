@@ -51,8 +51,11 @@ class GoogleDriveSizeCalculate:
         parsed = urlparse.urlparse(link)
         return parse_qs(parsed.query)['id'][0]
 
-    def moveFolderToAnotherFolder(self, originalFolderId, newParentFolderId):
-        previous_parents = self.gdrive_checker(originalFolderId)["parents"]
+    def moveFolderToAnotherFolder(self, originalFolderId, newParentFolderId, logFile=None):
+        itemResult = self.gdrive_checker(originalFolderId)
+        previous_parents = itemResult["parents"]
+        if logFile is not None:
+            logFile.write(f"Moving file/folder {originalFolderId}, name: {itemResult["name"]}, to new folder, {newParentFolderId}\n")
         file = self.__service.files().update(fileId=originalFolderId,
                                addParents=newParentFolderId,
                                removeParents=previous_parents[0],
@@ -237,8 +240,8 @@ service =  build('drive', 'v3', credentials=credentials, cache_discovery=False)
 # link_or_fileid = input("\nPaste your GoogleDrive file/folder's link/fileId : ")
 #
 # # ~ Complete creating the service variable and then pass it here
-calculator = GoogleDriveSizeCalculate(service)  #GoogleDriveSizeCalculate(service)
-calculator.moveFolderToAnotherFolder("1q_SnCcAeZM1oV-SjPgDKIHbgjxLDjn3E", GoogleDriveSizeCalculate.getIdFromUrl("https://drive.google.com/drive/folders/1BL7bWhDaRHNW66CUHdmUfknp4SXUmnFx") )
+# calculator = GoogleDriveSizeCalculate(service)  #GoogleDriveSizeCalculate(service)
+# calculator.moveFolderToAnotherFolder("1q_SnCcAeZM1oV-SjPgDKIHbgjxLDjn3E", GoogleDriveSizeCalculate.getIdFromUrl("https://drive.google.com/drive/folders/1BL7bWhDaRHNW66CUHdmUfknp4SXUmnFx") )
 #
 # # Note that, gdrive folder size calculating speed depends on how many files inside a folder.
 # if not calculate is None:

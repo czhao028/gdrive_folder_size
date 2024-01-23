@@ -3,7 +3,7 @@ from httplib2 import Http
 import concurrent.futures
 import gdrive_calculator
 from gdrive_calculator import service, credentials, GoogleDriveSizeCalculate
-
+LOG_FILE_NAME = "logOutput.txt"
 BYTES_LIMIT = 100 * 1073741824
 ID_TO_NAME_DICT = {}
 #Here is the code that will return the index if the value is found, otherwise the index of the item that is closest to that value, hope it helps.
@@ -217,11 +217,12 @@ while i < len(pairings):
     else:
         all_spare_drives.append(calculate_i)
         i += 1
-
+print(all_spare_drives)
 calculator = GoogleDriveSizeCalculate(service)
-for i, sparedrive_calculateObj in enumerate(all_spare_drives):
-    for folder_size, folder_id, folder_name in pairings[i]:
-        newFolder = calculator.moveFolderToAnotherFolder(folder_id, sparedrive_calculateObj["id"])
+with open(LOG_FILE_NAME, "w") as logOutF:
+    for i, sparedrive_calculateObj in enumerate(all_spare_drives):
+        for folder_size, folder_id, folder_name in pairings[i]:
+            newFolder = calculator.moveFolderToAnotherFolder(folder_id, sparedrive_calculateObj["id"], logFile=logOutF)
 
 
 # resource = {
