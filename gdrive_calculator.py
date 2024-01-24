@@ -12,7 +12,8 @@ from google_auth_oauthlib.flow import Flow
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-
+ID_TO_NAME_DICT = {}
+ID_TO_PARENT_DICT = {}
 def get_readable_file_size(size_in_bytes) -> str:
     SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
     if size_in_bytes is None:
@@ -51,14 +52,15 @@ class GoogleDriveSizeCalculate:
         parsed = urlparse.urlparse(link)
         return parse_qs(parsed.query)['id'][0]
 
-    def moveFolderToAnotherFolder(self, originalFolderId, newParentFolderId, logFile=None):
-        itemResult = self.gdrive_checker(originalFolderId)
-        previous_parents = itemResult["parents"]
+    def moveFolderToAnotherFolder(self, originalFolderId, newParentFolderId,
+                                  originalFolderName, originalFolderParentId, logFile=None):
         if logFile is not None:
-            logFile.write(f"Moving file/folder {originalFolderId}, name: {itemResult["name"]}, to new folder, {newParentFolderId}\n")
+            logFile.write(f"Moving file/folder {originalFolderId}, "
+                          f"name: {originalFolderName}, from previous folder {originalFolderParentId} "
+                          f"to new folder, {newParentFolderId}\n")
         file = self.__service.files().update(fileId=originalFolderId,
                                addParents=newParentFolderId,
-                               removeParents=previous_parents[0],
+                               removeParents=originalFolderParentId,
                                fields='id, parents',
                                supportsAllDrives=True,
                                supportsTeamDrives=True).execute()
@@ -115,6 +117,8 @@ class GoogleDriveSizeCalculate:
         finally:
             if error:
                 return
+            ID_TO_NAME_DICT[file_id] = name
+            ID_TO_PARENT_DICT[file_id] = drive_file['parents'][0]
             return {
                 'name': name,
                 'size': get_readable_file_size(self.total_bytes),
@@ -123,7 +127,7 @@ class GoogleDriveSizeCalculate:
                 'files': self.total_files,
                 'folders': self.total_folders,
                 'id': file_id,
-                'parents': drive_file['parents']
+                'parents': drive_file['parents'][0]
                 }
 
     def list_drive_dir(self, file_id: str) -> list:
@@ -241,6 +245,7 @@ service =  build('drive', 'v3', credentials=credentials, cache_discovery=False)
 #
 # # ~ Complete creating the service variable and then pass it here
 # calculator = GoogleDriveSizeCalculate(service)  #GoogleDriveSizeCalculate(service)
+# calculate = calculator.gdrive_checker(link_or_fileid)
 # calculator.moveFolderToAnotherFolder("1q_SnCcAeZM1oV-SjPgDKIHbgjxLDjn3E", GoogleDriveSizeCalculate.getIdFromUrl("https://drive.google.com/drive/folders/1BL7bWhDaRHNW66CUHdmUfknp4SXUmnFx") )
 #
 # # Note that, gdrive folder size calculating speed depends on how many files inside a folder.

@@ -2,10 +2,12 @@ from getfilelistpy import getfilelist
 from httplib2 import Http
 import concurrent.futures
 import gdrive_calculator
-from gdrive_calculator import service, credentials, GoogleDriveSizeCalculate
+from gdrive_calculator import service, credentials, GoogleDriveSizeCalculate, ID_TO_PARENT_DICT, ID_TO_NAME_DICT
+from googleapiclient.discovery import build
 LOG_FILE_NAME = "logOutput.txt"
 BYTES_LIMIT = 100 * 1073741824
-ID_TO_NAME_DICT = {}
+
+
 #Here is the code that will return the index if the value is found, otherwise the index of the item that is closest to that value, hope it helps.
 def searchTupleArray(array, start_idx, end_idx, search_val, occupied_indices):
    bool_start_index_already_in_use = (occupied_indices.get(start_idx) != None)
@@ -45,7 +47,6 @@ def verifyNotMovedFolderInNamesOfMovedFolder(not_moved_folder_id, list_of_moved_
 
 
 def getCombinedFolderNameOfListOfFoldersInPath(list_of_folder_ids, service):
-    global ID_TO_NAME_DICT
     combined_names = []
     for folder_id in list_of_folder_ids:
         if ID_TO_NAME_DICT.get(folder_id) == None:
@@ -56,14 +57,19 @@ def getCombinedFolderNameOfListOfFoldersInPath(list_of_folder_ids, service):
             combined_names.append(ID_TO_NAME_DICT.get(folder_id))
     return "_".join(combined_names)
 
-
-
 def findSubFoldersWithLessThanMaxBytes(folder_id, service):
     global BYTES_LIMIT
     #We're given that folder_id is a folder that is > 100GB
+    futuresFolders = list()
+    futuresFiles = list()
     id_folders_already_being_moved = dict()
     recursion_tree_folders_being_moved = []
     folders_not_moved = []
+    def anyParentFolderHasAlreadyBeenMoved(folderTreeExcludingFile):
+        for parentTree in folderTreeExcludingFile:
+            if id_folders_already_being_moved.get(parentTree) != None:
+                return True
+        return False
     #So we can create a newly moved folder in the new drive that's PARENTFOLDER1_SUBPARENTFOLDER2_SUBPARENTFOLDER3
     #i.e. [['1rbz6Lv3sQpAnEebm5L7taLOOiMB8_DsX', '1DNa_D0cpy1p9Hu0DptTn-4f_Gjji0TNc'], ['1rbz6Lv3sQpAnEebm5L7taLOOiMB8_DsX', '1WF9Jcv81PEdHFR5THMBvAjJJ59wrdSGU', '1uGC0TOLzBjKqX-6XesXV-_2Su0QLO9G2']]
     resource = {
@@ -77,8 +83,9 @@ def findSubFoldersWithLessThanMaxBytes(folder_id, service):
     for folder_list in res["folderTree"]["id"]:
         if len(folder_list) < 2: continue
         current_folder_id = folder_list[-1]
-        parent_folder_id = folder_list[-2]
-        if id_folders_already_being_moved.get(parent_folder_id) != None: continue
+        parents_folder_ids = folder_list[:-1]
+        if anyParentFolderHasAlreadyBeenMoved(parents_folder_ids):
+            continue
         calculator = GoogleDriveSizeCalculate(service)
         childFolderCalculate = calculator.gdrive_checker(current_folder_id)
         if childFolderCalculate["bytes"] < BYTES_LIMIT:
@@ -110,21 +117,26 @@ def findSubFoldersWithLessThanMaxBytes(folder_id, service):
       ]
     },
     """
-    for folderTreeContents in res["fileList"]:
-        if not folderTreeContents["files"]: continue
-        thisFolderId = folderTreeContents["folderTree"][-1]
-        if id_folders_already_being_moved.get(thisFolderId) != None: continue
-        for file_dict_obj in folderTreeContents["files"]:
-            calculator = GoogleDriveSizeCalculate(service)
-            childFileCalculate = calculator.gdrive_checker(file_dict_obj["id"])
-            if childFileCalculate["bytes"] < BYTES_LIMIT:
-                recursion_tree_folders_being_moved.append((childFileCalculate["bytes"],
-                                                       childFileCalculate["id"],
-                                                           childFileCalculate["name"]))
-            else:
-                print(f"ERROR: File {childFileCalculate["name"]} "
-                      f"in directory {getCombinedFolderNameOfListOfFoldersInPath(file_dict_obj["folderTree"], service)}"
-                      f" needs to be moved manually.")
+    with concurrent.futures.ThreadPoolExecutor() as executorForFiles:
+        for folderTreeContents in res["fileList"]:
+            if not folderTreeContents["files"]: continue
+            parentsOfFile_folderids = folderTreeContents["folderTree"]
+            if anyParentFolderHasAlreadyBeenMoved(parentsOfFile_folderids):
+                continue
+            for file_dict_obj in folderTreeContents["files"]:
+                service = build('drive', 'v3', credentials=credentials, cache_discovery=False)
+                calculator = GoogleDriveSizeCalculate(service)
+                futuresFiles.append(executorForFiles.submit(calculator.gdrive_checker, file_dict_obj["id"]))
+            for i, fut in enumerate(futuresFiles):
+                childFileCalculate = fut.result()
+                if childFileCalculate["bytes"] < BYTES_LIMIT:
+                    recursion_tree_folders_being_moved.append((childFileCalculate["bytes"],
+                                                           childFileCalculate["id"],
+                                                               childFileCalculate["name"]))
+                else:
+                    print(f"ERROR: File {childFileCalculate["name"]} "
+                          f"in directory {getCombinedFolderNameOfListOfFoldersInPath(childFileCalculate["parents"], service)}"
+                          f" needs to be moved manually.")
     return recursion_tree_folders_being_moved, folders_not_moved
 
 def getListSizeIdName_ForAllSubfoldersLessThanBytesLimit_ForGoogleDriveLink(gdrive_link, service):
@@ -159,28 +171,24 @@ Instructions
 # if not creds or creds.invalid:
 #     flow = client.flow_from_clientsecrets('rrc_crds.json', SCOPES)
 #     creds = tools.run_flow(flow, store)
-input_file_name = "MarketingAndCommunications_Videos.txt"
+input_file_name = "ProgramsFitnessAndWellness.txt"
 will_use_own_file = input("\nWould you like to provide a file of comma separated Google Drive links to separate into 100 GB folders? Y/N:")
 answer = will_use_own_file.strip().lower()
 if answer == "y":
     input_file_name = input("\nPaste file name for comma-separated list of Google Drive links:").strip()
 print(f"Using file name {input_file_name}")
 
-with concurrent.futures.ThreadPoolExecutor() as executor:
-    folder_sizeidname_tuples = []
-    futures = []
-    with open(input_file_name, "r") as in_file:
-        for line in in_file.readlines():
-            line = line.strip()
-            links = line.split(", ")
-            for link in links:
-                futures.append(
-                    executor.submit(getListSizeIdName_ForAllSubfoldersLessThanBytesLimit_ForGoogleDriveLink,
-                                    gdrive_link=link, service=service))
-        for future in futures:
-            list_of_sizeidname_tuples_for_gdrive_link = future.result()
-            folder_sizeidname_tuples.extend(list_of_sizeidname_tuples_for_gdrive_link)
 
+folder_sizeidname_tuples = []
+futures = []
+with (open(input_file_name, "r") as in_file):
+    for line in in_file.readlines():
+        line = line.strip()
+        links = line.split(", ")
+        for link in links:
+            list_of_sizeidname_tuples_for_gdrive_link = getListSizeIdName_ForAllSubfoldersLessThanBytesLimit_ForGoogleDriveLink(
+                                gdrive_link=link, service=service)
+            folder_sizeidname_tuples.extend(list_of_sizeidname_tuples_for_gdrive_link)
 
 pairings = []
 picked_indices = dict()
@@ -219,10 +227,12 @@ while i < len(pairings):
         i += 1
 print(all_spare_drives)
 calculator = GoogleDriveSizeCalculate(service)
-with open(LOG_FILE_NAME, "w") as logOutF:
+with open(LOG_FILE_NAME, "w", encoding="utf-8") as logOutF:
     for i, sparedrive_calculateObj in enumerate(all_spare_drives):
         for folder_size, folder_id, folder_name in pairings[i]:
-            newFolder = calculator.moveFolderToAnotherFolder(folder_id, sparedrive_calculateObj["id"], logFile=logOutF)
+            newFolder = calculator.moveFolderToAnotherFolder(
+                folder_id, sparedrive_calculateObj["id"],
+                ID_TO_NAME_DICT.get(folder_id), ID_TO_PARENT_DICT[folder_id], logFile=logOutF)
 
 
 # resource = {
